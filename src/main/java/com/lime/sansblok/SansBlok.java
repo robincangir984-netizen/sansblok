@@ -25,7 +25,7 @@ import java.util.*;
 
 public final class SansBlok extends JavaPlugin implements Listener, CommandExecutor, TabCompleter {
 
-    // Arkadaşının eklentisindeki zorunlu orijinal Map yapıları (String olarak tutuluyor)
+    // Arkadaşının eklentisindeki 3 zorunlu orijinal Map yapısı
     public Map<Location, Integer> activeBlocks = new HashMap<>();
     public Map<Location, String> internalHolograms = new HashMap<>(); 
     public Map<UUID, Long> clickCooldown = new HashMap<>();
@@ -159,17 +159,27 @@ public final class SansBlok extends JavaPlugin implements Listener, CommandExecu
     public void onBlockBreak(BlockBreakEvent event) {
         Block block = event.getBlock();
         Location loc = block.getLocation();
+        Player player = event.getPlayer();
 
+        // Blok ister aktif Şans Bloğu (Sponge) olsun ister yenilenme aşamasında (Bedrock) olsun
         if (activeBlocks.containsKey(loc) || yenilenmeTasklari.containsKey(loc)) {
-            if (!event.getPlayer().getGameMode().name().equals("CREATIVE")) {
-                event.setCancelled(true);
-            } else {
+            // Sadece Creative modundakiler kırınca tamamen kaldırsın
+            if (player.getGameMode().name().equals("CREATIVE")) {
                 String holoIsim = internalHolograms.remove(loc);
-                if (holoIsim != null) hologramSilKomutla(holoIsim);
+                if (holoIsim != null) {
+                    hologramSilKomutla(holoIsim);
+                }
                 activeBlocks.remove(loc);
-                BukkitTask task = yenilenmeTasklari.remove(loc);
-                if (task != null) task.cancel();
                 kalanSureler.remove(loc);
+                
+                BukkitTask task = yenilenmeTasklari.remove(loc);
+                if (task != null) {
+                    task.cancel();
+                }
+                player.sendMessage("§a[SansBlok] Şans bloğu ve tüm hologram verileri başarıyla haritadan kaldırıldı!");
+            } else {
+                // Hayatta kalma modundakiler kıramaz, iptal et
+                event.setCancelled(true);
             }
         }
     }
@@ -207,7 +217,7 @@ public final class SansBlok extends JavaPlugin implements Listener, CommandExecu
         int kalanCan = activeBlocks.get(loc) - 1;
         int maxCan = getConfig().getInt("sans-blogu.can", 5);
 
-        // Kardeşim sadece tüp mercan veriliyor, chate çöp mesaj falan ASLA gitmiyor.
+        // Sadece tüp mercan veriliyor
         player.getInventory().addItem(new ItemStack(Material.TUBE_CORAL, 1));
 
         if (kalanCan > 0) {
@@ -220,7 +230,6 @@ public final class SansBlok extends JavaPlugin implements Listener, CommandExecu
             block.setType(Material.BEDROCK);
             activeBlocks.remove(loc);
             
-            // Bütün ödül/zombi/elmas tetikleyicileri tamamen kaldırıldı.
             bedrockGeriSayimBaslat(loc);
         }
     }
@@ -261,14 +270,14 @@ public final class SansBlok extends JavaPlugin implements Listener, CommandExecu
         yenilenmeTasklari.put(loc, task);
     }
 
-    // --- /holo create TABANLI GECİKMELİ KOMUT SİSTEMİ ---
+    // --- /holo create TABANLI DÜZELTİLMİŞ GECİKMELİ KOMUT SİSTEMİ ---
 
     private void hologramGuncelleKomutla(Location loc, int kalanCan, int maxCan, boolean bedrockModu) {
         String holoIsim = internalHolograms.get(loc);
         List<String> satirlar = getDinamikSatirlar(loc, kalanCan, maxCan, bedrockModu);
 
         if (holoIsim == null) {
-            final String yeniHoloIsim = "sb-" + new Random().nextInt(900000);
+            final String yeniHoloIsim = "sb-" + (100000 + new Random().nextInt(899999));
             internalHolograms.put(loc, yeniHoloIsim);
 
             double yukseklik = getConfig().getDouble("sans-blogu.hologram-yükseklik", 2.2);
@@ -277,19 +286,21 @@ public final class SansBlok extends JavaPlugin implements Listener, CommandExecu
             double z = loc.getZ() + 0.5;
             String dunya = loc.getWorld() != null ? loc.getWorld().getName() : "world";
 
-            // Senin belirttiğin doğru oluşturma komutu: /holo create <isim>
+            // Hologramı oluştur
             Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "holo create " + yeniHoloIsim);
             
-            // Konumlandırma işlemini yapıyoruz
+            // Konumlandır
             Bukkit.dispatchCommand(Bukkit.getConsoleSender(), String.format(Locale.US, "holo teleport %s %f %f %f %s", yeniHoloIsim, x, y, z, dunya));
 
-            // Eklentinin kaydı tamamlaması için 1 tick bekleyip satırları basıyoruz
+            // Hatanın çözümü için gecikmeyi 3 tick'e çektik, eklenti hologramı tamamen kaydettikten sonra satırları ekleyecek.
             new BukkitRunnable() {
                 @Override
                 public void run() {
-                    satirlariYaz(yeniHoloIsim, satirlar);
+                    if (internalHolograms.containsValue(yeniHoloIsim)) {
+                        satirlariYaz(yeniHoloIsim, satirlar);
+                    }
                 }
-            }.runTaskLater(this, 1L);
+            }.runTaskLater(this, 3L);
 
         } else {
             satirlariYaz(holoIsim, satirlar);
@@ -297,10 +308,11 @@ public final class SansBlok extends JavaPlugin implements Listener, CommandExecu
     }
 
     private void satirlariYaz(String holoIsim, List<String> satirlar) {
-        // FancyHolograms komut mantığında satır güncellemek için önce temizleyip sonra ekliyoruz
+        // Eski satırların kalıntılarını silmek için komut gönder
         Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "holo remove_line " + holoIsim + " 1");
         Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "holo remove_line " + holoIsim + " 2");
 
+        // Güvenli şekilde sırayla ekleme yap
         for (String satir : satirlar) {
             Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "holo add_line " + holoIsim + " " + satir);
         }
@@ -308,6 +320,9 @@ public final class SansBlok extends JavaPlugin implements Listener, CommandExecu
 
     private void hologramSilKomutla(String holoIsim) {
         if (holoIsim != null) {
+            // Önce satır temizliği yapıp sonra hologramı kökten siliyoruz
+            Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "holo remove_line " + holoIsim + " 1");
+            Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "holo remove_line " + holoIsim + " 2");
             Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "holo remove " + holoIsim);
         }
     }
