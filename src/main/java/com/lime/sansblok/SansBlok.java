@@ -22,13 +22,13 @@ import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.scheduler.BukkitTask;
 
-import java.lang.reflect.Method;
 import java.util.*;
 
 public final class SansBlok extends JavaPlugin implements Listener, CommandExecutor, TabCompleter {
 
+    // Arkadaşının eklentisindeki zorunlu Map yapıları
     public Map<Location, Integer> activeBlocks = new HashMap<>();
-    public Map<Location, String> internalHolograms = new HashMap<>(); // Lokasyona karşılık gelen hologram adları
+    public Map<Location, String> internalHolograms = new HashMap<>(); // Lokasyona karşılık gelen hologram isimleri
     public Map<UUID, Long> clickCooldown = new HashMap<>();
     
     private final Map<Location, BukkitTask> yenilenmeTasklari = new HashMap<>();
@@ -63,7 +63,7 @@ public final class SansBlok extends JavaPlugin implements Listener, CommandExecu
         clickCooldown.clear();
 
         for (String holoIsim : internalHolograms.values()) {
-            fancyHologramSilKomutla(holoIsim);
+            hologramSilKomutla(holoIsim);
         }
         internalHolograms.clear();
         activeBlocks.clear();
@@ -154,7 +154,7 @@ public final class SansBlok extends JavaPlugin implements Listener, CommandExecu
 
         int maxCan = getConfig().getInt("sans-blogu.can", 5);
         activeBlocks.put(loc, maxCan);
-        hologramOlustur(loc, maxCan, maxCan, false);
+        hologramOlusturVeGuncelleKomutla(loc, maxCan, maxCan, false);
     }
 
     @EventHandler
@@ -167,7 +167,7 @@ public final class SansBlok extends JavaPlugin implements Listener, CommandExecu
                 event.setCancelled(true);
             } else {
                 String holoIsim = internalHolograms.remove(loc);
-                if (holoIsim != null) fancyHologramSilKomutla(holoIsim);
+                if (holoIsim != null) hologramSilKomutla(holoIsim);
                 activeBlocks.remove(loc);
                 BukkitTask task = yenilenmeTasklari.remove(loc);
                 if (task != null) task.cancel();
@@ -213,7 +213,7 @@ public final class SansBlok extends JavaPlugin implements Listener, CommandExecu
 
         if (kalanCan > 0) {
             activeBlocks.put(loc, kalanCan);
-            hologramGuncelle(loc, kalanCan, maxCan, false);
+            hologramOlusturVeGuncelleKomutla(loc, kalanCan, maxCan, false);
             player.sendMessage("§7Bloğun kalan direnci: §e" + kalanCan);
             
             int progressedStage = (int) (((double) (maxCan - kalanCan) / maxCan) * 9);
@@ -237,7 +237,7 @@ public final class SansBlok extends JavaPlugin implements Listener, CommandExecu
         final int toplamSaniye = 1800;
         kalanSureler.put(loc, toplamSaniye);
 
-        hologramGuncelle(loc, 0, 0, true);
+        hologramOlusturVeGuncelleKomutla(loc, 0, 0, true);
 
         BukkitTask task = new BukkitRunnable() {
             @Override
@@ -258,10 +258,10 @@ public final class SansBlok extends JavaPlugin implements Listener, CommandExecu
                     int maxCan = getConfig().getInt("sans-blogu.can", 5);
                     activeBlocks.put(loc, maxCan);
                     
-                    hologramGuncelle(loc, maxCan, maxCan, false);
+                    hologramOlusturVeGuncelleKomutla(loc, maxCan, maxCan, false);
                 } else {
                     kalanSureler.put(loc, sure);
-                    hologramGuncelle(loc, 0, 0, true);
+                    hologramOlusturVeGuncelleKomutla(loc, 0, 0, true);
                 }
             }
         }.runTaskTimer(this, 20L, 20L);
@@ -269,106 +269,44 @@ public final class SansBlok extends JavaPlugin implements Listener, CommandExecu
         yenilenmeTasklari.put(loc, task);
     }
 
-    // --- HATASIZ FANCYHOLOGRAMS API YÖNETİMİ ---
+    // --- KOMUT TABANLI GARANTİLİ HOLOGRAM YÖNETİMİ ---
 
-    private void hologramOlustur(Location loc, int kalanCan, int maxCan, boolean bedrockModu) {
-        try {
-            double yukseklik = getConfig().getDouble("sans-blogu.hologram-yükseklik", 2.2);
-            Location holoLoc = loc.clone().add(0.5, yukseklik, 0.5);
-            String holoIsim = "sb-" + UUID.randomUUID().toString().substring(0, 6);
-
-            // API'yi çağırıp temel TextHologramData nesnesini oluşturuyoruz
-            Class<?> textDataClass = Class.forName("de.oliver.fancyholograms.api.data.TextHologramData");
-            Class<?> holoDataClass = Class.forName("de.oliver.fancyholograms.api.data.HologramData");
-            
-            java.lang.reflect.Constructor<?> constructor = textDataClass.getConstructor(String.class, Location.class);
-            Object holoData = constructor.newInstance(holoIsim, holoLoc);
-
-            // Satırları hatasız eklemek için getLines listesini çekip doğrudan eleman manipülasyonu uyguluyoruz
-            Method getLinesMethod = textDataClass.getMethod("getLines");
-            @SuppressWarnings("unchecked")
-            List<String> lines = (List<String>) getLinesMethod.invoke(holoData);
-            lines.clear();
-            lines.addAll(getDinamikSatirlar(loc, kalanCan, maxCan, bedrockModu));
-
-            // API üzerinden hologramı oluşturup kaydediyoruz
-            Class<?> apiClass = Class.forName("de.oliver.fancyholograms.api.FancyHologramsAPI");
-            Method getApiMethod = apiClass.getMethod("get");
-            Object apiInstance = getApiMethod.invoke(null);
-            
-            Method createMethod = apiInstance.getClass().getMethod("createHologram", holoDataClass);
-            Object hologram = createMethod.invoke(apiInstance, holoData);
-
-            Method getManagerMethod = apiInstance.getClass().getMethod("getHologramManager");
-            Object managerInstance = getManagerMethod.invoke(apiInstance);
-
-            Method addHologramMethod = managerInstance.getClass().getMethod("addHologram", Class.forName("de.oliver.fancyholograms.api.hologram.Hologram"));
-            addHologramMethod.invoke(managerInstance, hologram);
-
-            internalHolograms.put(loc, holoIsim);
-        } catch (Exception e) {
-            getLogger().warning("Hologram olusturulamadi: " + e.getMessage());
-        }
-    }
-
-    private void hologramGuncelle(Location loc, int kalanCan, int maxCan, boolean bedrockModu) {
+    private void hologramOlusturVeGuncelleKomutla(Location loc, int kalanCan, int maxCan, boolean bedrockModu) {
         String holoIsim = internalHolograms.get(loc);
+        
+        // Eğer bu lokasyonda önceden kalan bir hologram adı yoksa yeni isim üret ve sıfırdan oluştur
         if (holoIsim == null) {
-            hologramOlustur(loc, kalanCan, maxCan, bedrockModu);
-            return;
+            holoIsim = "sb-" + UUID.randomUUID().toString().substring(0, 6);
+            internalHolograms.put(loc, holoIsim);
+            
+            double yukseklik = getConfig().getDouble("sans-blogu.hologram-yükseklik", 2.2);
+            double x = loc.getX() + 0.5;
+            double y = loc.getY() + yukseklik;
+            double z = loc.getZ() + 0.5;
+            String dunya = loc.getWorld() != null ? loc.getWorld().getName() : "world";
+
+            // 1. Adım: Hologramı Dünyada Yarat
+            Bukkit.dispatchCommand(Bukkit.getConsoleSender(), String.format("hologram create %s", holoIsim));
+            // 2. Adım: Doğru Konuma Taşı
+            Bukkit.dispatchCommand(Bukkit.getConsoleSender(), String.format("hologram teleport %s %f %f %f %s", holoIsim, x, y, z, dunya));
         }
 
-        try {
-            Class<?> apiClass = Class.forName("de.oliver.fancyholograms.api.FancyHologramsAPI");
-            Method getApiMethod = apiClass.getMethod("get");
-            Object apiInstance = getApiMethod.invoke(null);
+        // Satırları güncelle (Her güncellemede eski satırlar tamamen uçurulup yenileri basılır)
+        List<String> satirlar = getDinamikSatirlar(loc, kalanCan, maxCan, bedrockModu);
+        
+        // 3. Adım: Mevcut satırları temizle ve sırayla yeni metinleri bas
+        Bukkit.dispatchCommand(Bukkit.getConsoleSender(), String.format("hologram remove_line %s 1", holoIsim));
+        Bukkit.dispatchCommand(Bukkit.getConsoleSender(), String.format("hologram remove_line %s 2", holoIsim));
 
-            Method getManagerMethod = apiInstance.getClass().getMethod("getHologramManager");
-            Object managerInstance = getManagerMethod.invoke(apiInstance);
-
-            Method getHologramMethod = managerInstance.getClass().getMethod("getHologram", String.class);
-            Object hologram = getHologramMethod.invoke(managerInstance, holoIsim);
-
-            if (hologram != null) {
-                Method javaGetData = hologram.getClass().getMethod("getData");
-                Object holoData = javaGetData.invoke(hologram);
-
-                Class<?> textDataClass = Class.forName("de.oliver.fancyholograms.api.data.TextHologramData");
-                if (textDataClass.isInstance(holoData)) {
-                    // Listeyi çekip, temizleyip güncel satırları basıyoruz (setLines bağımlılığı bitti!)
-                    Method getLinesMethod = textDataClass.getMethod("getLines");
-                    @SuppressWarnings("unchecked")
-                    List<String> lines = (List<String>) getLinesMethod.invoke(holoData);
-                    lines.clear();
-                    lines.addAll(getDinamikSatirlar(loc, kalanCan, maxCan, bedrockModu));
-
-                    Method refreshMethod = hologram.getClass().getMethod("refreshForAll");
-                    refreshMethod.invoke(hologram);
-                }
-            }
-        } catch (Exception e) {
-            getLogger().warning("Hologram yenilenemedi: " + e.getMessage());
+        for (String satir : satirlar) {
+            // FancyHolograms komut formatına göre satır ekleme işlemi yapılıyor
+            Bukkit.dispatchCommand(Bukkit.getConsoleSender(), String.format("hologram add_line %s %s", holoIsim, satir));
         }
     }
 
-    private void fancyHologramSilKomutla(String holoIsim) {
-        try {
-            Class<?> apiClass = Class.forName("de.oliver.fancyholograms.api.FancyHologramsAPI");
-            Method getApiMethod = apiClass.getMethod("get");
-            Object apiInstance = getApiMethod.invoke(null);
-
-            Method getManagerMethod = apiInstance.getClass().getMethod("getHologramManager");
-            Object managerInstance = getManagerMethod.invoke(apiInstance);
-
-            Method getHologramMethod = managerInstance.getClass().getMethod("getHologram", String.class);
-            Object hologram = getHologramMethod.invoke(managerInstance, holoIsim);
-
-            if (hologram != null) {
-                Method removeMethod = managerInstance.getClass().getMethod("removeHologram", Class.forName("de.oliver.fancyholograms.api.hologram.Hologram"));
-                removeMethod.invoke(managerInstance, hologram);
-            }
-        } catch (Exception e) {
-            // Pas geç
+    private void hologramSilKomutla(String holoIsim) {
+        if (holoIsim != null) {
+            Bukkit.dispatchCommand(Bukkit.getConsoleSender(), String.format("hologram remove %s", holoIsim));
         }
     }
 
