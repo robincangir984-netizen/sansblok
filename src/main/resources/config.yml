@@ -1,0 +1,24 @@
+sans-blogu:
+  can: 5
+  hologram-yükseklik: 2.2
+  hologram-satirlari:
+    - "&e&l--- ŞANS BLOĞU ---"
+    - "&7Kalan Can: &c%kalan_can%&7/&4%toplam_can%"
+    - "&eKır ve Şansını Dene!"
+
+oduller:
+  elmas:
+    sans-orani: 30
+    komutlar:
+      - "give %player% diamond 5"
+    mesaj: "&aŞans Bloğundan 5 adet Elmas çıktı!"
+  altin:
+    sans-orani: 50
+    komutlar:
+      - "give %player% gold_ingot 10"
+    mesaj: "&aŞans Bloğundan 10 adet Altın Külkesi çıktı!"
+  sanssiz:
+    sans-orani: 20
+    komutlar:
+      - "summon zombie %x% %y% %z%"
+    mesaj: "&cOlamaz! Şans bloğundan bir zombi fırladı!"
