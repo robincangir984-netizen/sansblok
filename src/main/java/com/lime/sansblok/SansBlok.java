@@ -12,8 +12,10 @@ import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
+import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
+import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -30,6 +32,9 @@ public final class SansBlok extends JavaPlugin implements Listener, CommandExecu
     private final Map<Location, Object> blokHologramlari = new HashMap<>();
     private final Map<Location, BukkitTask> yenilenmeTasklari = new HashMap<>();
     private final Map<Location, Integer> kalanSureler = new HashMap<>();
+    
+    // Makro koruması için oyuncu bazlı cooldown takibi (Milisaniye cinsinden)
+    private final Map<UUID, Long> vurusCooldownlari = new HashMap<>();
     private final Random random = new Random();
 
     @Override
@@ -57,6 +62,7 @@ public final class SansBlok extends JavaPlugin implements Listener, CommandExecu
         }
         yenilenmeTasklari.clear();
         kalanSureler.clear();
+        vurusCooldownlari.clear();
 
         for (Object holo : blokHologramlari.values()) {
             fancyHologramSil(holo);
@@ -96,7 +102,7 @@ public final class SansBlok extends JavaPlugin implements Listener, CommandExecu
             
             if (meta != null) {
                 meta.setDisplayName("§e§lŞans Bloğu");
-                meta.setLore(Arrays.asList("§7Yere koy ve şansını dene!", "§7Kırmak için direnci zorla."));
+                meta.setLore(Arrays.asList("§7Yere koy ve şansını dene!", "§7Vurarak direnci zorla."));
                 sansBlogu.setItemMeta(meta);
             }
 
@@ -109,7 +115,6 @@ public final class SansBlok extends JavaPlugin implements Listener, CommandExecu
         return true;
     }
 
-    // --- TAB COMPLETION (Otomatik Tamamlama Altyapısı) ---
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (command.getName().equalsIgnoreCase("sansblok")) {
@@ -119,8 +124,6 @@ public final class SansBlok extends JavaPlugin implements Listener, CommandExecu
                     completions.add("al");
                     completions.add("reload");
                 }
-                
-                // Oyuncunun yazdığı harflere göre filtreleme yapar
                 List<String> result = new ArrayList<>();
                 for (String s : completions) {
                     if (s.toLowerCase().startsWith(args[0].toLowerCase())) {
@@ -156,11 +159,37 @@ public final class SansBlok extends JavaPlugin implements Listener, CommandExecu
         hologramOlustur(loc, maxCan, maxCan, false);
     }
 
+    // Blok kırma mekanizmasını tamamen kapatıyoruz (Creative mod hariç)
     @EventHandler
     public void onBlockBreak(BlockBreakEvent event) {
         Block block = event.getBlock();
         Location loc = block.getLocation();
 
+        if (blokCanlari.containsKey(loc) || yenilenmeTasklari.containsKey(loc)) {
+            if (!event.getPlayer().getGameMode().name().equals("CREATIVE")) {
+                event.setCancelled(true);
+            } else {
+                // Eğer yetkili admin yaratıcı modda kırarsa sistemi temizle
+                Object holo = blokHologramlari.remove(loc);
+                if (holo != null) fancyHologramSil(holo);
+                blokCanlari.remove(loc);
+                BukkitTask task = yenilenmeTasklari.remove(loc);
+                if (task != null) task.cancel();
+                kalanSureler.remove(loc);
+            }
+        }
+    }
+
+    // SOL TIKLAMA VE MAKRO KORUMA SİSTEMİ
+    @EventHandler
+    public void onPlayerInteract(PlayerInteractEvent event) {
+        if (event.getAction() != Action.LEFT_CLICK_BLOCK) return;
+        
+        Block block = event.getClickedBlock();
+        if (block == null) return;
+        Location loc = block.getLocation();
+
+        // Yenilenme aşamasındaki Bedrock'a dokunulmasın
         if (yenilenmeTasklari.containsKey(loc)) {
             event.setCancelled(true);
             return;
@@ -168,22 +197,44 @@ public final class SansBlok extends JavaPlugin implements Listener, CommandExecu
 
         if (!blokCanlari.containsKey(loc)) return;
 
+        // Şans bloğuna sol tıklandığında normal kırma animasyonunu engelle
+        event.setCancelled(true);
+
         Player player = event.getPlayer();
+        UUID playerUUID = player.getUniqueId();
+        long simdi = System.currentTimeMillis();
+        
+        // MAKRO ENGELİ: İki vuruş arasında en az 400 milisaniye (Yaklaşık 2.5 CPS) olmalıdır.
+        // Konfigürasyona eklemek istersen varsayılan olarak koruma süresini 400ms yaptık.
+        long cooldownSuresi = getConfig().getLong("sans-blogu.makro-koruma-ms", 400); 
+        
+        if (vurusCooldownlari.containsKey(playerUUID)) {
+            long sonVurus = vurusCooldownlari.get(playerUUID);
+            if ((simdi - sonVurus) < cooldownSuresi) {
+                // Makro algılandı, çok hızlı tıklıyor. İşlemi iptal et ve ödül verme.
+                return;
+            }
+        }
+        
+        // Son vuruş zamanını güncelle
+        vurusCooldownlari.put(playerUUID, simdi);
+
         int kalanCan = blokCanlari.get(loc) - 1;
         int maxCan = getConfig().getInt("sans-blogu.can", 5);
 
+        // Her başarılı (makrosuz) sol tıkta mercan ödülü ver
         vurusOduluVer(player);
 
         if (kalanCan > 0) {
-            event.setCancelled(true);
             blokCanlari.put(loc, kalanCan);
             hologramGuncelle(loc, kalanCan, maxCan, false);
             player.sendMessage("§7Bloğun kalan direnci: §e" + kalanCan);
             
+            // Çatlama efekti görsel hissi için
             int progressedStage = (int) (((double) (maxCan - kalanCan) / maxCan) * 9);
             player.sendBlockDamage(loc, (float) progressedStage / 9f);
         } else {
-            event.setCancelled(true);
+            // Son vuruş yapıldı: Bedrock moduna geçiş
             block.setType(Material.BEDROCK);
             blokCanlari.remove(loc);
             
@@ -199,7 +250,7 @@ public final class SansBlok extends JavaPlugin implements Listener, CommandExecu
     }
 
     private void bedrockGeriSayimBaslat(final Location loc) {
-        final int toplamSaniye = 1800;
+        final int toplamSaniye = 1800; // 30 Dakika
         kalanSureler.put(loc, toplamSaniye);
 
         hologramGuncelle(loc, 0, 0, true);
@@ -234,6 +285,8 @@ public final class SansBlok extends JavaPlugin implements Listener, CommandExecu
         yenilenmeTasklari.put(loc, task);
     }
 
+    // --- FANCYHOLOGRAMS REFLECTION ENTEGRASYONU ---
+    
     private void hologramOlustur(Location loc, int kalanCan, int maxCan, boolean bedrockModu) {
         try {
             double yukseklik = getConfig().getDouble("sans-blogu.hologram-yükseklik", 2.2);
