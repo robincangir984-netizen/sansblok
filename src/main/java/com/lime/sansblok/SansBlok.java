@@ -8,7 +8,6 @@ import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabCompleter;
-import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -26,14 +25,13 @@ import java.util.*;
 
 public final class SansBlok extends JavaPlugin implements Listener, CommandExecutor, TabCompleter {
 
-    // Arkadaşının eklentisindeki 3 zorunlu Map yapısı (Derleme hatası almamak için String olarak tutuyoruz)
+    // Arkadaşının eklentisindeki zorunlu orijinal Map yapıları (String olarak tutuluyor)
     public Map<Location, Integer> activeBlocks = new HashMap<>();
     public Map<Location, String> internalHolograms = new HashMap<>(); 
     public Map<UUID, Long> clickCooldown = new HashMap<>();
     
     private final Map<Location, BukkitTask> yenilenmeTasklari = new HashMap<>();
     private final Map<Location, Integer> kalanSureler = new HashMap<>();
-    private final Random random = new Random();
 
     @Override
     public void onEnable() {
@@ -154,7 +152,7 @@ public final class SansBlok extends JavaPlugin implements Listener, CommandExecu
 
         int maxCan = getConfig().getInt("sans-blogu.can", 5);
         activeBlocks.put(loc, maxCan);
-        hologramGuncelleSifirBagimlilik(loc, maxCan, maxCan, false);
+        hologramGuncelleKomutla(loc, maxCan, maxCan, false);
     }
 
     @EventHandler
@@ -209,12 +207,12 @@ public final class SansBlok extends JavaPlugin implements Listener, CommandExecu
         int kalanCan = activeBlocks.get(loc) - 1;
         int maxCan = getConfig().getInt("sans-blogu.can", 5);
 
-        // REİS: Sadece mercan veriliyor, chate çöp mesaj falan gitmiyor.
+        // Kardeşim sadece tüp mercan veriliyor, chate çöp mesaj falan ASLA gitmiyor.
         player.getInventory().addItem(new ItemStack(Material.TUBE_CORAL, 1));
 
         if (kalanCan > 0) {
             activeBlocks.put(loc, kalanCan);
-            hologramGuncelleSifirBagimlilik(loc, kalanCan, maxCan, false);
+            hologramGuncelleKomutla(loc, kalanCan, maxCan, false);
             
             int progressedStage = (int) (((double) (maxCan - kalanCan) / maxCan) * 9);
             player.sendBlockDamage(loc, (float) progressedStage / 9f);
@@ -222,7 +220,7 @@ public final class SansBlok extends JavaPlugin implements Listener, CommandExecu
             block.setType(Material.BEDROCK);
             activeBlocks.remove(loc);
             
-            anaOdulVer(player, loc);
+            // Bütün ödül/zombi/elmas tetikleyicileri tamamen kaldırıldı.
             bedrockGeriSayimBaslat(loc);
         }
     }
@@ -231,7 +229,7 @@ public final class SansBlok extends JavaPlugin implements Listener, CommandExecu
         final int toplamSaniye = 1800;
         kalanSureler.put(loc, toplamSaniye);
 
-        hologramGuncelleSifirBagimlilik(loc, 0, 0, true);
+        hologramGuncelleKomutla(loc, 0, 0, true);
 
         BukkitTask task = new BukkitRunnable() {
             @Override
@@ -252,10 +250,10 @@ public final class SansBlok extends JavaPlugin implements Listener, CommandExecu
                     int maxCan = getConfig().getInt("sans-blogu.can", 5);
                     activeBlocks.put(loc, maxCan);
                     
-                    hologramGuncelleSifirBagimlilik(loc, maxCan, maxCan, false);
+                    hologramGuncelleKomutla(loc, maxCan, maxCan, false);
                 } else {
                     kalanSureler.put(loc, sure);
-                    hologramGuncelleSifirBagimlilik(loc, 0, 0, true);
+                    hologramGuncelleKomutla(loc, 0, 0, true);
                 }
             }
         }.runTaskTimer(this, 20L, 20L);
@@ -263,77 +261,55 @@ public final class SansBlok extends JavaPlugin implements Listener, CommandExecu
         yenilenmeTasklari.put(loc, task);
     }
 
-    // --- SIFIR IMPORT - DOĞRUDAN REFLECTION ILE FANCYHOLOGRAMS YÖNETİMİ ---
+    // --- /holo create TABANLI GECİKMELİ KOMUT SİSTEMİ ---
 
-    private void hologramGuncelleSifirBagimlilik(Location loc, int kalanCan, int maxCan, boolean bedrockModu) {
+    private void hologramGuncelleKomutla(Location loc, int kalanCan, int maxCan, boolean bedrockModu) {
         String holoIsim = internalHolograms.get(loc);
-        List<String> yeniSatirlar = getDinamikSatirlar(loc, kalanCan, maxCan, bedrockModu);
+        List<String> satirlar = getDinamikSatirlar(loc, kalanCan, maxCan, bedrockModu);
 
-        try {
-            // FancyHolograms API sınıfını ve yöneticisini çalışma zamanında (Runtime) buluyoruz
-            Class<?> apiClass = Class.forName("de.oliver.fancyholograms.api.FancyHologramsAPI");
-            Object apiInstance = apiClass.getMethod("get").invoke(null);
-            Object managerInstance = apiClass.getMethod("getHologramManager").invoke(apiInstance);
+        if (holoIsim == null) {
+            final String yeniHoloIsim = "sb-" + new Random().nextInt(900000);
+            internalHolograms.put(loc, yeniHoloIsim);
 
-            Class<?> dataClass = Class.forName("de.oliver.fancyholograms.api.data.TextHologramData");
-            Class<?> holoClass = Class.forName("de.oliver.fancyholograms.api.hologram.Hologram");
+            double yukseklik = getConfig().getDouble("sans-blogu.hologram-yükseklik", 2.2);
+            double x = loc.getX() + 0.5;
+            double y = loc.getY() + yukseklik;
+            double z = loc.getZ() + 0.5;
+            String dunya = loc.getWorld() != null ? loc.getWorld().getName() : "world";
 
-            if (holoIsim == null) {
-                // Sıfırdan hologram adı üret
-                holoIsim = "sb-" + new Random().nextInt(900000);
-                internalHolograms.put(loc, holoIsim);
+            // Senin belirttiğin doğru oluşturma komutu: /holo create <isim>
+            Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "holo create " + yeniHoloIsim);
+            
+            // Konumlandırma işlemini yapıyoruz
+            Bukkit.dispatchCommand(Bukkit.getConsoleSender(), String.format(Locale.US, "holo teleport %s %f %f %f %s", yeniHoloIsim, x, y, z, dunya));
 
-                double yukseklik = getConfig().getDouble("sans-blogu.hologram-yükseklik", 2.2);
-                Location holoLoc = loc.clone().add(0.5, yukseklik, 0.5);
-
-                // TextHologramData nesnesini oluştur
-                Object dataInstance = dataClass.getConstructor(String.class, Location.class).newInstance(holoIsim, holoLoc);
-
-                // Satırları içeri aktar (metot adı versiyona göre değişirse ikisini de deniyoruz)
-                try {
-                    dataClass.getMethod("setLines", List.class).invoke(dataInstance, yeniSatirlar);
-                } catch (Exception e) {
-                    List<String> lines = (List<String>) dataClass.getMethod("getLines").invoke(dataInstance);
-                    lines.clear();
-                    lines.addAll(yeniSatirlar);
+            // Eklentinin kaydı tamamlaması için 1 tick bekleyip satırları basıyoruz
+            new BukkitRunnable() {
+                @Override
+                public void run() {
+                    satirlariYaz(yeniHoloIsim, satirlar);
                 }
+            }.runTaskLater(this, 1L);
 
-                // Hologramı oluştur ve haritaya ekle
-                Object hologramInstance = apiClass.getMethod("createHologram", Class.forName("de.oliver.fancyholograms.api.data.HologramData")).invoke(apiInstance, dataInstance);
-                managerInstance.getClass().getMethod("addHologram", holoClass).invoke(managerInstance, hologramInstance);
-            } else {
-                // Var olan hologramı ismiyle bulup güncelle
-                Object hologramInstance = managerInstance.getClass().getMethod("getHologram", String.class).invoke(managerInstance, holoIsim);
-                if (hologramInstance != null) {
-                    Object dataInstance = holoClass.getMethod("getData").invoke(hologramInstance);
-                    try {
-                        dataClass.getMethod("setLines", List.class).invoke(dataInstance, yeniSatirlar);
-                    } catch (Exception e) {
-                        List<String> lines = (List<String>) dataClass.getMethod("getLines").invoke(dataInstance);
-                        lines.clear();
-                        lines.addAll(yeniSatirlar);
-                    }
-                    holoClass.getMethod("refreshForAll").invoke(hologramInstance);
-                }
-            }
-        } catch (Exception e) {
-            // Sunucuda FancyHolograms yoksa veya Runtime hatası koruması
+        } else {
+            satirlariYaz(holoIsim, satirlar);
+        }
+    }
+
+    private void satirlariYaz(String holoIsim, List<String> satirlar) {
+        // FancyHolograms komut mantığında satır güncellemek için önce temizleyip sonra ekliyoruz
+        Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "holo remove_line " + holoIsim + " 1");
+        Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "holo remove_line " + holoIsim + " 2");
+
+        for (String satir : satirlar) {
+            Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "holo add_line " + holoIsim + " " + satir);
         }
     }
 
     private void hologramSilKomutla(String holoIsim) {
-        if (holoIsim == null) return;
-        try {
-            Class<?> apiClass = Class.forName("de.oliver.fancyholograms.api.FancyHologramsAPI");
-            Object apiInstance = apiClass.getMethod("get").invoke(null);
-            Object managerInstance = apiClass.getMethod("getHologramManager").invoke(apiInstance);
-            Object hologramInstance = managerInstance.getClass().getMethod("getHologram", String.class).invoke(managerInstance, holoIsim);
-            
-            if (hologramInstance != null) {
-                Class<?> holoClass = Class.forName("de.oliver.fancyholograms.api.hologram.Hologram");
-                managerInstance.getClass().getMethod("removeHologram", holoClass).invoke(managerInstance, hologramInstance);
-            }
-        } catch (Exception ignored) {}
+        if (holoIsim != null) {
+            Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "holo remove " + holoIsim);
+        }
     }
 
     private List<String> getDinamikSatirlar(Location loc, int kalanCan, int maxCan, boolean bedrockModu) {
@@ -357,48 +333,5 @@ public final class SansBlok extends JavaPlugin implements Listener, CommandExecu
             }
         }
         return satirlar;
-    }
-
-    private void anaOdulVer(Player player, Location loc) {
-        ConfigurationSection section = getConfig().getConfigurationSection("oduller");
-        if (section == null) return;
-
-        Set<String> odulAnahtarlari = section.getKeys(false);
-        if (odulAnahtarlari.isEmpty()) return;
-
-        int toplamSans = 0;
-        for (String key : odulAnahtarlari) {
-            toplamSans += section.getInt(key + ".sans-orani", 0);
-        }
-
-        int randomNum = random.nextInt(toplamSans);
-        int counter = 0;
-        String chosenReward = null;
-
-        for (String key : odulAnahtarlari) {
-            counter += section.getInt(key + ".sans-orani", 0);
-            if (randomNum < counter) {
-                chosenReward = key;
-                break;
-            }
-        }
-
-        if (chosenReward != null) {
-            String mesaj = section.getString(chosenReward + ".mesaj");
-            if (mesaj != null && !mesaj.isEmpty()) {
-                player.sendMessage(mesaj.replace("&", "§").replace("%player%", player.getName()));
-            }
-
-            List<String> komutlar = section.getStringList(chosenReward + ".komutlar");
-            for (String komut : komutlar) {
-                String dynamicCmd = komut
-                        .replace("%player%", player.getName())
-                        .replace("%x%", String.valueOf(loc.getBlockX()))
-                        .replace("%y%", String.valueOf(loc.getBlockY()))
-                        .replace("%z%", String.valueOf(loc.getBlockZ()));
-                
-                Bukkit.dispatchCommand(Bukkit.getConsoleSender(), dynamicCmd);
-            }
-        }
     }
 }
