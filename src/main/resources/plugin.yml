@@ -1,10 +1,8 @@
-name: sansblok
-version: '1.0'
+name: SansBlogu
+version: 1.0
 main: com.lime.sansblok.SansBlok
-api-version: '1.16'
-depend:
-  - FancyHolograms
+api-version: '1.21'
 commands:
   sansblok:
-    description: Sans blogu ana komutu.
+    description: Sans blogu ana komutu
     permission: sansblok.admin
