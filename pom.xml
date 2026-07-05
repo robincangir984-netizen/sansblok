@@ -12,10 +12,10 @@
             <id>papermc</id>
             <url>https://repo.papermc.io/repository/maven-public/</url>
         </repository>
-        <!-- FancyHolograms'ın resmi JitPack deposunu tam adresiyle ekledik -->
+        <!-- FancyHolograms'ın kendi resmi geliştirici reposunu ekledik -->
         <repository>
-            <id>jitpack.io</id>
-            <url>https://jitpack.io</url>
+            <id>fancyplugins-releases</id>
+            <url>https://repo.fancyplugins.de/releases/</url>
         </repository>
     </repositories>
     <dependencies>
@@ -25,11 +25,11 @@
             <version>1.20.4-R0.1-SNAPSHOT</version>
             <scope>provided</scope>
         </dependency>
-        <!-- Kütüphaneyi Jitpack'in okuyabileceği doğru tag formatına çektik -->
+        <!-- Resmi repodan direkt ve temiz şekilde çekiyoruz -->
         <dependency>
-            <groupId>com.github.FancyMcPlugins</groupId>
+            <groupId>de.oliver</groupId>
             <artifactId>FancyHolograms</artifactId>
-            <version>v2.3.2</version>
+            <version>2.3.2</version>
             <scope>provided</scope>
         </dependency>
     </dependencies>
